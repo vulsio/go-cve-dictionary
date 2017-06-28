@@ -4,9 +4,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/Sirupsen/logrus"
 	formatter "github.com/kotakanbe/logrus-prefixed-formatter"
 	"github.com/rifflock/lfshook"
+	"github.com/sirupsen/logrus"
 )
 
 var logger *logrus.Entry
