@@ -53,7 +53,7 @@ func Initialize(logDir string, output ...io.Writer) {
 			logrus.ErrorLevel: path,
 			logrus.FatalLevel: path,
 			logrus.PanicLevel: path,
-		}))
+		}, nil))
 	}
 }
 
