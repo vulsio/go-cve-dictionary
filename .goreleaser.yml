@@ -18,6 +18,5 @@ archive:
   files:
   - LICENSE
   - README*
-  - CHANGELOG.md
 snapshot:
   name_template: SNAPSHOT-{{ .Commit }}
