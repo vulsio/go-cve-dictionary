@@ -1,0 +1,131 @@
+package fetcher
+
+import (
+	"bytes"
+	"compress/gzip"
+	"fmt"
+	"io/ioutil"
+	"net/http"
+	"net/url"
+	"time"
+
+	"github.com/htcat/htcat"
+	c "github.com/kotakanbe/go-cve-dictionary/config"
+	"github.com/kotakanbe/go-cve-dictionary/log"
+	"github.com/kotakanbe/go-cve-dictionary/util"
+)
+
+//FetchRequest has fetch target information
+type FetchRequest struct {
+	Year int
+	URL  string
+	GZIP bool
+}
+
+//FetchResult has url and fetched Bytes
+type FetchResult struct {
+	Year int
+	URL  string
+	Body []byte
+}
+
+//FetchFeedFiles fetches vulnerability feed file concurrently
+func FetchFeedFiles(reqs []FetchRequest) (results []FetchResult, err error) {
+	reqChan := make(chan FetchRequest, len(reqs))
+	resChan := make(chan FetchResult, len(reqs))
+	errChan := make(chan error, len(reqs))
+	defer close(reqChan)
+	defer close(resChan)
+	defer close(errChan)
+
+	for _, r := range reqs {
+		log.Infof("Fetching... %s", r.URL)
+	}
+
+	go func() {
+		for _, r := range reqs {
+			reqChan <- r
+		}
+	}()
+
+	concurrency := len(reqs)
+	tasks := util.GenWorkers(concurrency)
+	for range reqs {
+		tasks <- func() {
+			select {
+			case req := <-reqChan:
+				body, err := fetchFile(req, 20/len(reqs))
+				if err != nil {
+					errChan <- err
+					return
+				}
+				resChan <- FetchResult{
+					Year: req.Year,
+					URL:  req.URL,
+					Body: body,
+				}
+			}
+			return
+		}
+	}
+
+	errs := []error{}
+	timeout := time.After(10 * 60 * time.Second)
+	for range reqs {
+		select {
+		case res := <-resChan:
+			results = append(results, res)
+			log.Infof("Fetched... %s", res.URL)
+		case err := <-errChan:
+			errs = append(errs, err)
+		case <-timeout:
+			return results, fmt.Errorf("Timeout Fetching")
+		}
+	}
+	if 0 < len(errs) {
+		return results, fmt.Errorf("%s", errs)
+	}
+	return results, nil
+}
+
+func fetchFile(req FetchRequest, parallelism int) (body []byte, err error) {
+	var proxyURL *url.URL
+	httpCilent := &http.Client{}
+	if c.Conf.HTTPProxy != "" {
+		if proxyURL, err = url.Parse(c.Conf.HTTPProxy); err != nil {
+			return nil, fmt.Errorf("Failed to parse proxy url: %s", err)
+		}
+		httpCilent = &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
+	}
+
+	u, err := url.Parse(req.URL)
+	if err != nil {
+		return nil, fmt.Errorf("aborting: could not parse given URL: %v", err)
+	}
+	buf := bytes.Buffer{}
+	htc := htcat.New(httpCilent, u, parallelism)
+	if _, err := htc.WriteTo(&buf); err != nil {
+		return nil, fmt.Errorf("aborting: could not write to output stream: %v",
+			err)
+	}
+
+	if req.GZIP {
+		reader, err := gzip.NewReader(bytes.NewReader(buf.Bytes()))
+		defer reader.Close()
+		if err != nil {
+			return nil, fmt.Errorf(
+				"Failed to decompress NVD feedfile. url: %s, err: %s",
+				req.URL, err)
+		}
+
+		bytes, err := ioutil.ReadAll(reader)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"Failed to Read NVD feedfile. url: %s, err: %s",
+				req.URL, err)
+		}
+		return bytes, nil
+	}
+
+	return buf.Bytes(), nil
+}

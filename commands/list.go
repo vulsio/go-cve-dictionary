@@ -1,0 +1,192 @@
+package commands
+
+import (
+	"context"
+	"flag"
+	"fmt"
+	"os"
+	"sort"
+
+	"github.com/google/subcommands"
+	c "github.com/kotakanbe/go-cve-dictionary/config"
+	"github.com/kotakanbe/go-cve-dictionary/db"
+	jvn "github.com/kotakanbe/go-cve-dictionary/fetcher/jvn/xml"
+	"github.com/kotakanbe/go-cve-dictionary/fetcher/nvd"
+	log "github.com/kotakanbe/go-cve-dictionary/log"
+	"github.com/kotakanbe/go-cve-dictionary/models"
+	"github.com/kotakanbe/go-cve-dictionary/util"
+	"github.com/olekukonko/tablewriter"
+)
+
+// ListCmd is Subcommand for fetch Nvd information.
+type ListCmd struct {
+	debug     bool
+	debugSQL  bool
+	logDir    string
+	logJSON   bool
+	dbpath    string
+	dbtype    string
+	httpProxy string
+}
+
+// Name return subcommand name
+func (*ListCmd) Name() string { return "list" }
+
+// Synopsis return synopsis
+func (*ListCmd) Synopsis() string { return "Show a list of fetched feeds" }
+
+// Usage return usage
+func (*ListCmd) Usage() string {
+	return `list:
+	fetchnvd
+		[-dbtype=mysql|postgres|sqlite3|redis]
+		[-dbpath=$PWD/cve.sqlite3 or connection string]
+		[-http-proxy=http://192.168.0.1:8080]
+		[-debug]
+		[-debug-sql]
+		[-log-dir=/path/to/log]
+		[-log-json]
+`
+}
+
+// SetFlags set flag
+func (p *ListCmd) SetFlags(f *flag.FlagSet) {
+	f.BoolVar(&p.debug, "debug", false, "debug mode")
+	f.BoolVar(&p.debugSQL, "debug-sql", false, "SQL debug mode")
+
+	defaultLogDir := util.GetDefaultLogDir()
+	f.StringVar(&p.logDir, "log-dir", defaultLogDir, "/path/to/log")
+	f.BoolVar(&p.logJSON, "log-json", false, "output log as JSON")
+
+	pwd := os.Getenv("PWD")
+	f.StringVar(&p.dbpath, "dbpath", pwd+"/cve.sqlite3",
+		"/path/to/sqlite3 or SQL connection string")
+
+	f.StringVar(&p.dbtype, "dbtype", "sqlite3",
+		"Database type to store data in (sqlite3, mysql, postgres or redis supported)")
+
+	f.StringVar(
+		&p.httpProxy,
+		"http-proxy",
+		"",
+		"http://proxy-url:port (default: empty)",
+	)
+}
+
+// Execute execute
+func (p *ListCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) subcommands.ExitStatus {
+	c.Conf.Debug = p.debug
+	c.Conf.DebugSQL = p.debugSQL
+	c.Conf.DBPath = p.dbpath
+	c.Conf.DBType = p.dbtype
+	c.Conf.HTTPProxy = p.httpProxy
+	log.SetLogger(p.logDir, c.Conf.Quiet, c.Conf.Debug, p.logJSON)
+	if !c.Conf.Validate() {
+		return subcommands.ExitUsageError
+	}
+
+	driver, locked, err := db.NewDB(c.Conf.DBType, c.Conf.DBPath, c.Conf.DebugSQL)
+	if err != nil {
+		if locked {
+			log.Errorf("Failed to Open DB. Close DB connection: %s", err)
+			return subcommands.ExitFailure
+		}
+		log.Errorf("%s", err)
+		return subcommands.ExitFailure
+	}
+	defer driver.CloseDB()
+
+	jsonMetas, xmlMetas, err := nvd.ListFetchedFeeds(driver)
+	if err != nil {
+		log.Errorf("%s", err)
+		return subcommands.ExitFailure
+	}
+	sort.Slice(jsonMetas, func(i, j int) bool {
+		return jsonMetas[i].URL < jsonMetas[j].URL
+	})
+	sort.Slice(xmlMetas, func(i, j int) bool {
+		return xmlMetas[i].URL < xmlMetas[j].URL
+	})
+
+	jvnMetas, err := jvn.ListFetchedFeeds(driver)
+	if err != nil {
+		log.Errorf("%s", err)
+		return subcommands.ExitFailure
+	}
+	sort.Slice(jvnMetas, func(i, j int) bool {
+		return jvnMetas[i].URL < jvnMetas[j].URL
+	})
+
+	metas := []models.FeedMeta{}
+	for _, mm := range [][]models.FeedMeta{jsonMetas, xmlMetas, jvnMetas} {
+		metas = append(metas, mm...)
+	}
+	data := [][]string{}
+	for _, meta := range metas {
+		data = append(data, meta.ToTableWriterRow())
+	}
+	table := tablewriter.NewWriter(os.Stdout)
+	table.SetHeader([]string{"Source", "Year", "Status", "Fetched", "Latest"})
+	table.SetBorder(true)
+	table.SetHeaderColor(
+		tablewriter.Colors{tablewriter.Bold},
+		tablewriter.Colors{tablewriter.Bold},
+		tablewriter.Colors{tablewriter.Bold},
+		tablewriter.Colors{tablewriter.Bold},
+		tablewriter.Colors{tablewriter.Bold})
+	table.AppendBulk(data)
+	table.Render()
+
+	cmds := []string{}
+	for _, mm := range [][]models.FeedMeta{jsonMetas, xmlMetas, jvnMetas} {
+		cmd := getUpdateCommand(mm)
+		if cmd != "" {
+			cmds = append(cmds, cmd)
+		}
+	}
+
+	if 0 < len(cmds) {
+		fmt.Printf("\nTo update feeds, execute the following commands.\n")
+		for _, cmd := range cmds {
+			fmt.Println(cmd)
+		}
+	}
+
+	return subcommands.ExitSuccess
+}
+
+func getUpdateCommand(metas []models.FeedMeta) string {
+	if len(metas) == 0 {
+		return ""
+	}
+	years := map[string]bool{}
+	latest := false
+	for _, meta := range metas {
+		if meta.OutDated() {
+			y, _, err := meta.Year()
+			if err != nil {
+				log.Errorf("err")
+				continue
+			}
+			switch y {
+			case "modified", "recent":
+				latest = true
+			default:
+				years[y] = true
+			}
+		}
+	}
+
+	opt := metas[0].FetchOption()
+	if len(years) == 0 && latest {
+		return fmt.Sprintf("$ go-cve-dictionary %s -latest", opt)
+	}
+	if len(years) == 0 {
+		return ""
+	}
+	opt += " -years"
+	for y := range years {
+		opt += " " + y
+	}
+	return fmt.Sprintf("$ go-cve-dictionary %s", opt)
+}
