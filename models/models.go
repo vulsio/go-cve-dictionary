@@ -192,6 +192,7 @@ type NvdJSON struct {
 	References []Reference
 
 	// Assigner         string
+	Certs            []Cert
 	PublishedDate    time.Time
 	LastModifiedDate time.Time
 }
@@ -212,6 +213,7 @@ type Jvn struct {
 	Cpes       []Cpe `json:",omitempty"`
 	References []Reference
 
+	Certs            []Cert
 	PublishedDate    time.Time
 	LastModifiedDate time.Time
 }
@@ -288,6 +290,17 @@ type Reference struct {
 
 	Source string
 	Link   string `sql:"type:text"`
+}
+
+// Cert is Child model of Jvn/Nvd.
+// It holds CERT alerts.
+type Cert struct {
+	gorm.Model `json:"-" xml:"-"`
+	JvnID      uint `json:"-" xml:"-"`
+	NvdJSONID  uint `json:"-" xml:"-"`
+
+	Title string `sql:"type:text"`
+	Link  string `sql:"type:text"`
 }
 
 // Affect has vendor/product/version info in NVD JSON
