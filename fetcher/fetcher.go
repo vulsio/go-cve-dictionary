@@ -3,6 +3,7 @@ package fetcher
 import (
 	"bytes"
 	"compress/gzip"
+	"crypto/tls"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -90,12 +91,21 @@ func FetchFeedFiles(reqs []FetchRequest) (results []FetchResult, err error) {
 
 func fetchFile(req FetchRequest, parallelism int) (body []byte, err error) {
 	var proxyURL *url.URL
-	httpCilent := &http.Client{}
+	httpCilent := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
+	}
 	if c.Conf.HTTPProxy != "" {
 		if proxyURL, err = url.Parse(c.Conf.HTTPProxy); err != nil {
 			return nil, fmt.Errorf("Failed to parse proxy url: %s", err)
 		}
-		httpCilent = &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
+		httpCilent = &http.Client{
+			Transport: &http.Transport{
+				Proxy:           http.ProxyURL(proxyURL),
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			},
+		}
 	}
 
 	u, err := url.Parse(req.URL)
