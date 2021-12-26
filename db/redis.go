@@ -158,7 +158,10 @@ func (r *RedisDriver) GetFetchMeta() (*models.FetchMeta, error) {
 
 	datestr, err := r.conn.HGet(ctx, fetchMetaKey, "LastFetchedDate").Result()
 	if err != nil {
-		return nil, xerrors.Errorf("Failed to HGet LastFetchedDate. err: %w", err)
+		if !errors.Is(err, redis.Nil) {
+			return nil, xerrors.Errorf("Failed to HGet LastFetchedDate. err: %w", err)
+		}
+		datestr = time.Date(1000, time.January, 1, 0, 0, 0, 0, time.UTC).Format(time.RFC3339)
 	}
 	date, err := time.Parse(time.RFC3339, datestr)
 	if err != nil {
