@@ -3,6 +3,7 @@
 	build \
 	install \
 	lint \
+	golangci \
 	vet \
 	fmt \
 	fmtcheck \
@@ -39,8 +40,12 @@ install: main.go
 	$(GO) install -ldflags "$(LDFLAGS)"
 
 lint:
-	$(GO_OFF) get -u github.com/mgechev/revive
+	$(GO) install github.com/mgechev/revive@latest
 	revive -config ./.revive.toml -formatter plain $(PKGS)
+
+golangci:
+	$(GO) install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+	golangci-lint run
 
 vet:
 	echo $(PKGS) | xargs env $(GO) vet || exit;
