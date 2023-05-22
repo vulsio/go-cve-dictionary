@@ -19,7 +19,7 @@ require (
 	github.com/spf13/viper v1.15.0
 	golang.org/x/xerrors v0.0.0-20220907171357-04be3eba64a2
 	gorm.io/driver/mysql v1.5.0
-	gorm.io/driver/postgres v1.5.0
+	gorm.io/driver/postgres v1.5.2
 	gorm.io/gorm v1.25.0
 )
 
