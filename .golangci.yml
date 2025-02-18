@@ -1,5 +1,3 @@
-name: golang-ci
-
 linters-settings:
   revive:
     # see https://github.com/mgechev/revive#available-rules for details.
