@@ -10,3 +10,8 @@ updates:
     schedule:
       interval: "weekly"
     target-branch: "master"
+  - package-ecosystem: "github-actions" # See documentation for possible values
+    directory: "/" # Location of package manifests
+    schedule:
+      interval: "weekly"
+    target-branch: "master"
