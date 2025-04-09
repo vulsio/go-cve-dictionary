@@ -43,6 +43,14 @@ linters:
         - all
         - -ST1000 # at least one file in a package should have a package comment
         - -ST1005 # error strings should not be capitalized
+  exclusions:
+    rules:
+      - source: "defer .+\\.Close\\(\\)"
+        linters:
+          - errcheck
+      - source: "defer os.RemoveAll\\(.+\\)"
+        linters:
+          - errcheck
 
 formatters:
   enable:
