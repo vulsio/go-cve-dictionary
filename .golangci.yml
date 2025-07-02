@@ -41,7 +41,7 @@ linters:
           arguments:
             - [] # AllowList
             - [] # DenyList
-            - - skip-package-name-checks: true        
+            - - skip-package-name-checks: true
     staticcheck: # https://golangci-lint.run/usage/linters/#staticcheck
       checks:
         - all
